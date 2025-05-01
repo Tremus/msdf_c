@@ -1,10 +1,16 @@
-#include "svpng.h"
 #define STB_TRUETYPE_IMPLEMENTATION
-#include "../stb_truetype.h"
 #define MSDF_IMPLEMENTATION
+#define XHL_TIME_IMPL
+
+#include "svpng.h"
+#include "../stb_truetype.h"
 #include "../msdf.h"
 
-#include "stdio.h"
+#include <stdio.h>
+
+#include <xhl/debug.h>
+#include <xhl/time.h>
+
 
 
 #ifndef SAMPLE_ROOT
@@ -74,10 +80,40 @@ float g_map(float min, float max, float v) {
     return (v - min) / (max - min);
 }
 
+struct Arena
+{
+    void* data;
+    size_t cap;
+    size_t size;
+};
+
+static void* arena_alloc(size_t size, void* ctx) {
+    struct Arena* arena = ctx;
+    xassert(arena->size + size <= arena->cap);
+    void* ptr = arena->data + arena->size;
+    arena->size += size;
+    // fprintf(stderr, "Alloc: %zu\n", size);
+    return ptr;
+}
+
+static void arena_free(void* ptr, void* ctx) {
+    // return free(ptr);
+}
+
 int main() {
+    xtime_init();
     stbtt_fontinfo stbttInfo;
 
-    Range fontFile = g_fileRead(SAMPLE_ROOT "/fonts/Roboto-Regular.ttf");
+    // Range fontFile = g_fileRead(SAMPLE_ROOT "/fonts/Roboto-Regular.ttf");
+    // font = loadFont(ft, "C:\\Windows\\Fonts\\arialbd.ttf");
+    const char* font_fp = NULL;
+#ifdef _WIN32
+        font_fp = "C:\\Windows\\Fonts\\arialbd.ttf";
+#else
+        font_fp = SAMPLE_ROOT "/fonts/Roboto-Regular.ttf";
+#endif
+    
+        Range fontFile = g_fileRead(font_fp);
 
     if (fontFile.content == NULL) {
         assert(!"could not load font from disk");
@@ -93,25 +129,47 @@ int main() {
     int ascent, descent;
     stbtt_GetFontVMetrics(&stbttInfo, &ascent, &descent, 0);
 
-    int genSize = 128;
+    int genSize = 32;
     float genScale = stbtt_ScaleForPixelHeight(&stbttInfo, genSize);
+    
+    struct Arena arena = {0};
+    arena.cap = 1024 * 256;
+    arena.data = malloc(arena.cap);
+    msdf_AllocCtx allocCtx = {arena_alloc, arena_free, &arena};
+    // msdf_AllocCtx allocCtx = {g_alloc, g_free, NULL};
 
-    int glyph = 'Y';
-
-    int glyphIdx = stbtt_FindGlyphIndex(&stbttInfo, glyph);
-
-    msdf_AllocCtx allocCtx = {g_alloc, g_free, NULL};
-
-    int borderSize = 4;
+    static const char* latin =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890~`!@#$%^&*()-_=+,./<>?[]{}\\|;:'\"";
+    const size_t latin_len = strlen(latin);
 
     msdf_Result result;
-    int success = msdf_genGlyph(&result, &stbttInfo, glyphIdx, borderSize, genScale, 2.0f / genSize, &allocCtx);
-
-    if (success == 0) {
-        assert(!"Failed to generate msdf glyph");
-        return 1;
+    uint64_t time_start = xtime_now_ns();
+    size_t largest_alloc = 0;
+    for (int i = 0; i < latin_len; i++)
+    {
+        int glyph = latin[i];
+        int glyphIdx = stbtt_FindGlyphIndex(&stbttInfo, glyph);
+    
+        int borderSize = 4;
+    
+        int success = msdf_genGlyph(&result, &stbttInfo, glyphIdx, borderSize, genScale, 2.0f / genSize, &allocCtx);
+    
+        if (success == 0) {
+            xassert(!"Failed to generate msdf glyph");
+            return 1;
+        }
+        // fprintf(stderr, "Char: %c Total alloc: %zu bytes\n", glyph, arena.size);
+        // if (arena.size > largest_alloc)
+        //     largest_alloc = arena.size;
+        arena.size = 0;
+        // break;
     }
-
+    // NOTE: for arial bold with genSize=32, the total memory allocated was ~27kb for the character '@'
+    // fprintf(stderr, "Largest alloc: %zu bytes\n", largest_alloc);
+    uint64_t time_end = xtime_now_ns();
+    double   time_ms  = xtime_convert_ns_to_ms(time_end - time_start);
+    printf("Build %zu glyphs in %.2lfms", latin_len, time_ms);
+    
     FILE* fp = fopen(SAMPLE_ROOT "/sdf.png", "wb");
 
     uint8_t* pixels = malloc(sizeof(uint8_t) * result.width * result.height * 3);

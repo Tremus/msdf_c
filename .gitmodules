@@ -1,0 +1,3 @@
+[submodule "modules/xhl"]
+	path = modules/xhl
+	url = https://github.com/Tremus/xhl
