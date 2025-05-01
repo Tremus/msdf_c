@@ -1,3 +1,8 @@
+static void* arena_alloc(size_t size, void* ctx);
+static void arena_free(void* ptr, void* ctx);
+#define STBTT_malloc arena_alloc
+#define STBTT_free arena_free
+
 #define STB_TRUETYPE_IMPLEMENTATION
 #define MSDF_IMPLEMENTATION
 #define XHL_TIME_IMPL
@@ -104,6 +109,13 @@ int main() {
     xtime_init();
     stbtt_fontinfo stbttInfo;
 
+    struct Arena arena = {0};
+    arena.cap = 1024 * 256;
+    arena.data = malloc(arena.cap);
+    msdf_AllocCtx allocCtx = {arena_alloc, arena_free, &arena};
+    // msdf_AllocCtx allocCtx = {g_alloc, g_free, NULL};
+    stbttInfo.userdata = &arena;
+
     // Range fontFile = g_fileRead(SAMPLE_ROOT "/fonts/Roboto-Regular.ttf");
     // font = loadFont(ft, "C:\\Windows\\Fonts\\arialbd.ttf");
     const char* font_fp = NULL;
@@ -131,12 +143,6 @@ int main() {
 
     int genSize = 32;
     float genScale = stbtt_ScaleForPixelHeight(&stbttInfo, genSize);
-    
-    struct Arena arena = {0};
-    arena.cap = 1024 * 256;
-    arena.data = malloc(arena.cap);
-    msdf_AllocCtx allocCtx = {arena_alloc, arena_free, &arena};
-    // msdf_AllocCtx allocCtx = {g_alloc, g_free, NULL};
 
     static const char* latin =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890~`!@#$%^&*()-_=+,./<>?[]{}\\|;:'\"";
@@ -165,11 +171,11 @@ int main() {
         // break;
     }
     // NOTE: for arial bold with genSize=32, the total memory allocated was ~27kb for the character '@'
-    // fprintf(stderr, "Largest alloc: %zu bytes\n", largest_alloc);
     uint64_t time_end = xtime_now_ns();
     double   time_ms  = xtime_convert_ns_to_ms(time_end - time_start);
     printf("Build %zu glyphs in %.2lfms", latin_len, time_ms);
-    
+    // fprintf(stderr, "Largest alloc: %zu bytes\n", largest_alloc);
+
     FILE* fp = fopen(SAMPLE_ROOT "/sdf.png", "wb");
 
     uint8_t* pixels = malloc(sizeof(uint8_t) * result.width * result.height * 3);
